@@ -1,0 +1,29 @@
+# Git history
+.git
+.gitignore
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Terraform files and state
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfvars
+
+# Evidence screenshots
+evidence/
+
+# Go build artifacts
+**/bin/
+**/*.exe
+
+# Local development files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

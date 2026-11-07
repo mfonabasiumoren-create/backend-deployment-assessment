@@ -1,0 +1,28 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Terraform variables and state
+terraform/*.tfvars
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/.terraform/
+terraform/crash.log
+terraform/terraform.log
+terraform/override.tf
+terraform/override.tf.json
+
+# SSH private keys
+*.pem
+*.key
+
+# Go build artifacts
+bin/
+*.exe
+
+# OS files
+.DS_Store
+Thumbs.db
+# Temporary backup files
+*.cp
