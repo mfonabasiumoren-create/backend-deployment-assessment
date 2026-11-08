@@ -1,0 +1,66 @@
+services:
+  mongodb:
+    image: mongo:8.0
+    container_name: muchtodo-mongodb
+    restart: unless-stopped
+    env_file:
+      - .env
+    command:
+      - mongod
+      - --bind_ip_all
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${DB_NAME}
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet
+          --username "$$MONGO_INITDB_ROOT_USERNAME"
+          --password "$$MONGO_INITDB_ROOT_PASSWORD"
+          --authenticationDatabase admin
+          --eval "db.adminCommand('ping').ok ? quit(0) : quit(1)"
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 40s
+    networks:
+      - backend
+
+  much-to-do-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: muchtodo-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      HOME: /tmp
+      XDG_CACHE_HOME: /tmp/.cache
+    ports:
+      - "8080:8080"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - backend
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+
+volumes:
+  mongodb_data:
+  mongodb_config:
+
+networks:
+  backend:
+    driver: bridge

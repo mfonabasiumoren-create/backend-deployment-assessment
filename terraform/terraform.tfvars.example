@@ -1,0 +1,27 @@
+
+aws_region     = "eu-north-1"
+project_name   = "startuptech"
+vpc_cidr       = "10.0.0.0/16"
+
+availability_zones = [
+  "eu-north-1a",
+  "eu-north-1b"
+]
+
+public_subnet_cidrs = [
+  "10.0.1.0/24",
+  "10.0.2.0/24"
+]
+
+private_subnet_cidrs = [
+  "10.0.11.0/24",
+  "10.0.12.0/24"
+]
+
+instance_type = "t3.micro"
+
+# Replace with your current public IP address followed by /32
+my_ip = "YOUR_PUBLIC_IP/32"
+
+# Replace with the name of an existing EC2 key pair in eu-north-1
+key_pair_name = "YOUR_EC2_KEY_PAIR_NAME"

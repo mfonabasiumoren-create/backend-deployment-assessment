@@ -26,3 +26,6 @@ bin/
 Thumbs.db
 # Temporary backup files
 *.cp
+# Terraform saved plans
+terraform/tfplan
+terraform/*.tfplan
