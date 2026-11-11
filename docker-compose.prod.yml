@@ -1,0 +1,47 @@
+services:
+  much-to-do-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: muchtodo-api
+    restart: unless-stopped
+
+    env_file:
+      - .env.production
+
+    environment:
+      PORT: "8080"
+      HOME: /tmp
+      XDG_CACHE_HOME: /tmp/.cache
+      ENABLE_CACHE: "false"
+
+    ports:
+      - "8080:8080"
+
+    read_only: true
+
+    cap_drop:
+      - ALL
+
+    security_opt:
+      - no-new-privileges:true
+
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
