@@ -1,9 +1,6 @@
 services:
   much-to-do-api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-
+    image: 849076101572.dkr.ecr.eu-north-1.amazonaws.com/muchtodo-api:v1
     container_name: muchtodo-api
     restart: unless-stopped
 

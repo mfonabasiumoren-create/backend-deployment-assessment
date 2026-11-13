@@ -1,399 +1,532 @@
-**# MuchToDo Go API â€“ AWS Deployment Assessment**
+# MuchToDo Go API — AWS Deployment Assessment
+
+## Project Overview
+
+This project demonstrates the containerisation and deployment of the MuchToDo Go REST API using Docker, Docker Compose, Terraform and Amazon Web Services (AWS).
+
+The project provisions the required cloud infrastructure using Infrastructure as Code, configures secure network access, deploys the Go API to an EC2 instance and connects it to a separately hosted MongoDB database.
+
+The implementation demonstrates:
+
+- Docker containerisation and multi-stage builds.
+- Terraform infrastructure provisioning.
+- AWS VPC networking and subnet segmentation.
+- EC2 deployment and Bastion-host administration.
+- Application Load Balancer configuration.
+- IAM roles and least-privilege access.
+- AWS Systems Manager Parameter Store for secret retrieval.
+- Amazon ECR image publishing and deployment.
+- Application health checks and end-to-end connectivity verification.
+
+## Technology Stack
+
+| Component | Technology |
+|---|---|
+| Application | Go |
+| Containerisation | Docker |
+| Container orchestration | Docker Compose |
+| Database | MongoDB |
+| Infrastructure as Code | Terraform |
+| Cloud platform | Amazon Web Services |
+| Compute | Amazon EC2 |
+| Container registry | Amazon ECR |
+| Networking | VPC, public/private subnets, IGW, NAT Gateway |
+| Load balancing | Application Load Balancer |
+| Secrets management | AWS Systems Manager Parameter Store |
+| Access control | IAM roles and security groups |
+
+## AWS Architecture
+
+The infrastructure is deployed in the AWS Europe (Stockholm) region (`eu-north-1`).
+
+### Network architecture
+
+- VPC CIDR: `10.0.0.0/16`
+- Two public subnets distributed across separate Availability Zones.
+- Two private subnets distributed across separate Availability Zones.
+- Internet Gateway for public subnet connectivity.
+- NAT Gateway for outbound connectivity from private subnets.
+- Separate public and private route tables.
+
+### Compute architecture
+
+Three EC2 instances are provisioned:
+
+| Instance | Private IP | Placement | Responsibility |
+|---|---|---|---|
+| Bastion | `10.0.1.138` | Public subnet | Controlled SSH administration |
+| Backend | `10.0.11.188` | Private subnet | Hosts the MuchToDo API container |
+| MongoDB | `10.0.12.10` | Private subnet | Hosts the MongoDB database |
+
+All three instances use the `t3.micro` instance type.
+
+### Application traffic flow
+
+External HTTP traffic enters through the internet-facing Application Load Balancer.
+
+The ALB forwards requests to the Backend EC2 instance on port `8080`.
+
+The MuchToDo API connects to MongoDB over the private VPC network on port `27017`.
+
+The MongoDB server is deployed independently on its dedicated EC2 instance rather than as a container on the Backend EC2 instance.
+
+### Architecture summary
+
+```text
+                    Internet
+                       |
+                       |
+             Application Load Balancer
+                   HTTP :80
+                       |
+                       |
+             Backend Security Group
+                       |
+                       |
+              Backend EC2 Instance
+                 10.0.11.188
+                       |
+                Docker Container
+                 MuchToDo API
+                   Port 8080
+                       |
+                       |
+                 MongoDB SG
+                       |
+                       |
+               MongoDB EC2
+                 10.0.12.10
+                   Port 27017
+
+
+Administrator
+     |
+     | SSH
+     |
+Bastion EC2
+10.0.1.138
+     |
+     | SSH
+     |
+Backend EC2
+10.0.11.188
+```
+
+## Repository Structure
 
+```text
+backend-deployment-assessment/
+│
+├── Dockerfile
+├── docker-compose.yml
+├── docker-compose.prod.yml
+├── .dockerignore
+├── .env.example
+├── README.md
+│
+├── evidence/
+│   └── Deployment and infrastructure screenshots
+│
+├── terraform/
+│   ├── main.tf
+│   ├── variables.tf
+│   ├── outputs.tf
+│   ├── terraform.tfvars.example
+│   ├── .terraform.lock.hcl
+│   │
+│   └── user_data/
+│       ├── backend_setup.sh
+│       └── mongodb_setup.sh
+│
+└── Server/
+    └── MuchToDo/
+```
 
+## Local Docker Deployment
 
-**## Project Overview**
+### Prerequisites
 
+- Docker Desktop
+- Docker Compose
+- Git
 
+### Clone the repository
 
-**This project packages and deploys the MuchToDo Go REST API using Docker and provisions its AWS infrastructure using Terraform.**
+```bash
+git clone https://github.com/mfonabasiumoren-create/backend-deployment-assessment.git
 
+cd backend-deployment-assessment
+```
 
+### Configure environment variables
 
-**The assessment demonstrates containerisation, infrastructure as code, network segmentation, security-group configuration, IAM roles, secure parameter retrieval and application deployment architecture.**
+Create a local environment file:
 
+```bash
+cp .env.example .env
+```
 
+Configure the required application and MongoDB credentials in `.env`.
 
-**## Technology Stack**
+Do not commit this file.
 
+### Build and start the services
 
+```bash
+docker compose build
 
-**- \*\*Application:\*\* Go**
+docker compose up -d
+```
 
-**- \*\*Containerisation:\*\* Docker and Docker Compose**
+### Verify container status
 
-**- \*\*Database:\*\* MongoDB**
+```bash
+docker compose ps
+```
 
-**- \*\*Infrastructure as Code:\*\* Terraform**
+The local Compose configuration defines:
 
-**- \*\*Cloud Platform:\*\* Amazon Web Services (AWS)**
+- MuchToDo API service.
+- MongoDB service.
+- Persistent MongoDB volumes.
+- Shared Docker network.
+- MongoDB health check.
+- Backend dependency on MongoDB health.
+- Restart policies.
 
-**- \*\*Compute:\*\* Amazon EC2**
+### Test the API
 
-**- \*\*Networking:\*\* VPC, public and private subnets, Internet Gateway and NAT Gateway**
+```bash
+curl http://localhost:8080/health
+```
 
-**- \*\*Load Balancing:\*\* Application Load Balancer**
+The health endpoint should return a successful response indicating the application and database status.
 
-**- \*\*Secrets Management:\*\* AWS Systems Manager Parameter Store**
+## Terraform Infrastructure
 
-**- \*\*Access Control:\*\* IAM roles and security groups**
+### Prerequisites
 
+- Terraform
+- AWS CLI
+- Authenticated AWS account
+- Existing EC2 key pair
 
+### Configure Terraform variables
 
-**## Architecture**
+Navigate to the Terraform directory:
 
+```bash
+cd terraform
+```
 
+Create the local variables file:
 
-**The planned AWS architecture consists of:**
+```bash
+cp terraform.tfvars.example terraform.tfvars
+```
 
+Configure the appropriate:
 
+- AWS region.
+- Availability Zones.
+- Instance types.
+- Amazon Linux 2 AMI.
+- EC2 key pair.
+- Administrator public IP address.
 
-**1. A VPC with CIDR block `10.0.0.0/16`.**
+The `terraform.tfvars` file must remain excluded from version control.
 
-**2. Two public subnets distributed across separate Availability Zones.**
+### Initialise Terraform
 
-**3. Two private subnets distributed across separate Availability Zones.**
+```bash
+terraform init
+```
 
-**4. An Internet Gateway for public subnet connectivity.**
+### Format and validate
 
-**5. A NAT Gateway for outbound connectivity from private subnets.**
+```bash
+terraform fmt -recursive
 
-**6. A Bastion EC2 instance for controlled administrative access.**
+terraform validate
+```
 
-**7. A Backend EC2 instance hosting the Go API.**
+### Review the infrastructure plan
 
-**8. A separate MongoDB EC2 instance.**
+```bash
+terraform plan
+```
 
-**9. An Application Load Balancer distributing HTTP traffic to the backend.**
+### Provision the infrastructure
 
-**10. IAM roles and security groups restricting access between components.**
+After reviewing the proposed changes:
 
+```bash
+terraform apply
+```
 
+Confirm the operation when prompted.
 
-**## Repository Structure**
+### Retrieve infrastructure outputs
 
+```bash
+terraform output
+```
 
+The configured outputs include:
 
-**```text**
+- VPC ID.
+- ALB DNS name.
+- Bastion public IP.
+- Backend private IP.
 
-**backend-deployment-assessment/**
+### Infrastructure verification
 
-**â”œâ”€â”€ Dockerfile**
+The deployed Terraform state records 34 infrastructure resources.
 
-**â”œâ”€â”€ docker-compose.yml**
+The configuration has been formatted and validated successfully.
 
-**â”œâ”€â”€ .dockerignore**
+## AWS Application Deployment
 
-**â”œâ”€â”€ .env.example**
+### 1. Build the Docker image
 
-**â”œâ”€â”€ README.md**
+The application uses a multi-stage Dockerfile to produce a lean runtime image.
 
-**â”œâ”€â”€ evidence/**
+The container:
 
-**â”œâ”€â”€ terraform/**
+- Uses a non-root application user.
+- Exposes port `8080`.
+- Includes an application health check.
+- Uses additional container security restrictions.
 
-**â”‚   â”œâ”€â”€ main.tf**
+### 2. Publish the image to Amazon ECR
 
-**â”‚   â”œâ”€â”€ variables.tf**
+The production image is stored in the following ECR repository:
 
-**â”‚   â”œâ”€â”€ outputs.tf**
+```text
+849076101572.dkr.ecr.eu-north-1.amazonaws.com/muchtodo-api
+```
 
-**â”‚   â”œâ”€â”€ terraform.tfvars.example**
+The deployed image tag is:
 
-**â”‚   â”œâ”€â”€ .terraform.lock.hcl**
+```text
+v1
+```
 
-**â”‚   â””â”€â”€ user\_data/**
+The image was built locally for the Linux AMD64 platform and successfully pushed to ECR.
 
-**â”‚       â”œâ”€â”€ backend\_setup.sh**
+### 3. Access the Backend EC2 instance
 
-**â”‚       â””â”€â”€ mongodb\_setup.sh**
+SSH access to the private Backend EC2 instance is established through the Bastion host.
 
-**â””â”€â”€ Server/**
+The Backend instance does not require a public IP address.
 
-&#x20;   **â””â”€â”€ MuchToDo/**
+### 4. Retrieve application configuration
 
-**```**
+Production application configuration is stored in `.env.production` on the Backend EC2 instance.
 
+Sensitive configuration values are retrieved from AWS Systems Manager Parameter Store using the Backend instance's IAM role.
 
+Credentials are not embedded directly in the production Docker image.
 
-**## Local Docker Deployment**
+### 5. Deploy the API container
 
+The production Compose configuration references the ECR image and the production environment file.
 
+Start the application:
 
-**### Prerequisites**
+```bash
+sudo docker compose -f docker-compose.prod.yml up -d
+```
 
+Check container status:
 
+```bash
+sudo docker compose -f docker-compose.prod.yml ps
+```
 
-**- Docker Desktop**
+Inspect container health:
 
-**- Docker Compose**
+```bash
+sudo docker inspect muchtodo-api --format 'Status: {{.State.Status}} | Health: {{.State.Health.Status}}'
+```
 
-**- Git**
+The deployed API container was verified as running and healthy.
 
+### 6. MongoDB connectivity
 
+MongoDB is hosted independently on the dedicated private MongoDB EC2 instance.
 
-**### Setup**
+The database:
 
+- Uses authentication.
+- Runs as a replica set.
+- Uses a dedicated application database user.
+- Restricts inbound access to the Backend security group.
+- Retrieves bootstrap credentials from Systems Manager Parameter Store.
 
+The Backend application successfully connected to MongoDB.
 
-**Clone the repository:**
+## Production Docker Compose Design
 
+Two Compose configurations are maintained for different deployment environments.
 
+### Local development
 
-**```bash**
+`docker-compose.yml` defines both the API and MongoDB services.
 
-**git clone https://github.com/mfonabasiumoren-create/backend-deployment-assessment.git**
+This supports local application development and testing.
 
-**cd backend-deployment-assessment**
+### AWS production
 
-**```**
+`docker-compose.prod.yml` defines the API service and uses the prebuilt ECR image.
 
+MongoDB is accessed remotely through its private EC2 address.
 
+This separation avoids running a duplicate MongoDB service on the Backend EC2 instance.
 
-**Create your local environment file:**
+## Security Considerations
 
+The deployment implements the following security controls:
 
+- Backend and MongoDB instances are placed in private subnets.
+- Bastion SSH access is restricted to the administrator's current public IP.
+- Backend HTTP access on port `8080` is restricted to the ALB security group.
+- Backend SSH access is restricted to the Bastion security group.
+- MongoDB port `27017` is accessible only from the Backend security group.
+- IAM roles provide scoped access to required Systems Manager parameters and ECR image retrieval.
+- Application credentials are retrieved from Parameter Store rather than embedded in the Docker image.
+- The application container runs as a non-root user.
+- Container capabilities are dropped.
+- Privilege escalation is disabled.
+- The container uses a read-only root filesystem.
+- Environment files, Terraform state, saved plans and private SSH keys are excluded from Git.
 
-**```bash**
+## Deployment Verification
 
-**cp .env.example .env**
+The following deployment tests were completed successfully.
 
-**```**
+| Verification | Result |
+|---|---|
+| Terraform formatting | Passed |
+| Terraform validation | Passed |
+| Infrastructure provisioning | 34 resources recorded |
+| EC2 instances | All three running |
+| Backend Docker container | Running and healthy |
+| MongoDB connectivity | Successful |
+| ALB target health | Healthy |
+| Public `/health` endpoint | HTTP 200 OK |
+| Public `/ping` endpoint | HTTP 200 OK |
 
+### Public API health test
 
+```bash
+curl http://<ALB-DNS-NAME>/health
+```
 
-**Update `.env` with appropriate local credentials and application configuration.**
+Verified response:
 
+```json
+{
+  "cache": "disabled",
+  "database": "ok"
+}
+```
 
+### Public ping test
 
-**Build and start the containers:**
+```bash
+curl http://<ALB-DNS-NAME>/ping
+```
 
+Verified response:
 
+```json
+{
+  "message": "pong"
+}
+```
 
-**```bash**
+Both endpoints were successfully tested through the public Application Load Balancer.
 
-**docker compose build**
+## Evidence
 
-**docker compose up -d**
+The `evidence/` directory contains screenshots documenting:
 
-**```**
+- Local Docker container status.
+- Local API health checks.
+- User registration and login.
+- JWT authentication and protected endpoint access.
+- Terraform initialisation and planning.
+- VPC and subnet configuration.
+- SSH access through the Bastion host.
+- Docker Compose deployment on Backend EC2.
+- Public API access through the ALB.
+- Security-group inbound rules.
+- EC2 instances running.
+- Application Load Balancer and target group configuration.
+- Healthy ALB target status.
 
+The original Terraform Apply completion screenshot was not available during final evidence collection. Infrastructure provisioning is independently supported by the Terraform state resource inventory and the deployed AWS resources.
 
+## Terraform State and Sensitive Files
 
-**Check container status:**
+The original assessment requests submission of the Terraform state file.
 
+Terraform state can contain infrastructure metadata, resource attributes and sensitive information.
 
+The state file is therefore excluded from Git version control.
 
-**```bash**
+Before any separate submission, inspect the state for sensitive information and follow the instructor's approved secure submission method.
 
-**docker compose ps**
+Do not publish the raw state file in a public GitHub repository.
 
-**```**
+## Cleanup and Resource Teardown
 
+AWS infrastructure incurs ongoing charges, particularly EC2 instances, NAT Gateway, Application Load Balancer, Elastic IPs and data transfer.
 
+After completing the assessment and collecting all required evidence, review the infrastructure before destroying it.
 
-**Test the API health endpoint:**
+To remove the Terraform-managed infrastructure:
 
+```bash
+cd terraform
 
+terraform plan -destroy
 
-**```bash**
+terraform destroy
+```
 
-**curl http://localhost:8080/health**
+Review the destruction plan carefully before confirming.
 
-**```**
+Do not run the destruction command while the deployed application or infrastructure is still required.
 
+Also review and remove any separately created resources that are not managed by the Terraform configuration, such as the ECR repository and its images, if they are no longer needed.
 
+## Important Notes
 
-**The local Compose configuration runs the API and MongoDB with persistent storage, a shared Docker network and a MongoDB health check.**
+Never commit:
 
+- `.env`
+- `.env.production`
+- `terraform/terraform.tfvars`
+- `terraform/terraform.tfstate`
+- `terraform/terraform.tfstate.backup`
+- `terraform/tfplan`
+- Private SSH keys
+- AWS credentials
+- Database passwords
+- JWT signing secrets
 
+Use the supplied example files to configure your own environment.
 
-**## Terraform Infrastructure**
+---
 
+**Project:** MuchToDo Go API — AWS Deployment Assessment
 
+**Cloud Region:** `eu-north-1`
 
-**### Prerequisites**
+**Infrastructure:** Terraform-managed AWS resources
 
+**Application Deployment:** Docker and Amazon ECR
 
-
-**- Terraform**
-
-**- AWS CLI**
-
-**- An authenticated AWS account**
-
-**- An EC2 key pair**
-
-
-
-**### Deployment preparation**
-
-
-
-**Navigate to the Terraform directory:**
-
-
-
-**```bash**
-
-**cd terraform**
-
-**```**
-
-
-
-**Create a local variables file from the example:**
-
-
-
-**```bash**
-
-**cp terraform.tfvars.example terraform.tfvars**
-
-**```**
-
-
-
-**Update the variables with the appropriate AWS region, Availability Zones, instance type, AMI, key pair and current public IP address.**
-
-
-
-**Initialise Terraform:**
-
-
-
-**```bash**
-
-**terraform init**
-
-**```**
-
-
-
-**Format and validate the configuration:**
-
-
-
-**```bash**
-
-**terraform fmt -recursive**
-
-**terraform validate**
-
-**```**
-
-
-
-**Review the proposed infrastructure:**
-
-
-
-**```bash**
-
-**terraform plan**
-
-**```**
-
-
-
-**Apply the configuration only after reviewing the plan:**
-
-
-
-**```bash**
-
-**terraform apply**
-
-**```**
-
-
-
-**Retrieve the infrastructure outputs:**
-
-
-
-**```bash**
-
-**terraform output**
-
-**```**
-
-
-
-**## Security Considerations**
-
-
-
-**- Backend and MongoDB instances are placed in private subnets.**
-
-**- SSH access to the Bastion is restricted to the configured administrator IP.**
-
-**- Backend access is restricted to the Application Load Balancer and Bastion security groups.**
-
-**- MongoDB access is restricted to the Backend security group.**
-
-**- IAM roles provide scoped access to required Systems Manager parameters.**
-
-**- Environment files, Terraform state, saved plans and private keys are excluded from version control.**
-
-**- The application container runs as a non-root user with additional container security restrictions.**
-
-
-
-**## Evidence**
-
-
-
-**The `evidence/` directory contains screenshots documenting the Docker build and runtime tests, API functionality, authentication, Terraform initialisation and planning, and AWS infrastructure provisioning.**
-
-
-
-**## Implementation Status**
-
-
-
-**The following work has been completed:**
-
-
-
-**- Docker image built successfully.**
-
-**- Local MongoDB and API containers started and reported healthy.**
-
-**- API health endpoint tested successfully.**
-
-**- User registration and login tested successfully.**
-
-**- JWT authentication and a protected API endpoint tested successfully.**
-
-**- Terraform configuration formatted and validated.**
-
-**- AWS infrastructure provisioned successfully: 34 resources added, with no changes or deletions.**
-
-
-
-**\*\*Remaining verification:\*\* AWS EC2 bootstrap completion, remote MongoDB connectivity, backend application deployment and successful end-to-end access through the Application Load Balancer have not yet been verified.**
-
-
-
-**## Important Notes**
-
-
-
-**Do not commit the following files:**
-
-
-
-**- `.env`**
-
-**- `terraform/terraform.tfvars`**
-
-**- `terraform/terraform.tfstate`**
-
-**- `terraform/tfplan`**
-
-**- Private SSH keys**
-
-
-
-**Use the supplied example files to configure your own environment.**
+**Database:** Dedicated MongoDB EC2 instance
